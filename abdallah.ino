@@ -1,7 +1,7 @@
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
+#include <UbidotsESPMQTT.h>
 
 // Déclaration des broches pour le module GPS NEO-6M
 #define GPS_TX D8   // Broche D8 pour le TX du GPS
@@ -18,13 +18,12 @@ float longitude = 0.0;
 bool gpsDataAvailable = false; // Indicateur pour savoir si de nouvelles données GPS sont disponibles
 
 // WiFi
-const char* ssid = "VotreSSID";      // Nom de votre réseau WiFi
-const char* password = "VotreMotDePasse";  // Mot de passe de votre réseau WiFi
+const char* ssid = "VotreSSID";      // Nom de  WiFi
+const char* password = "VotreMotDePasse";  // Mot de passe de  réseau WiFi
 
-// Serveur web
-const char* serverUrl = "http://votresiteweb.com/endpoint";
-
-WiFiClient wifiClient; // Objet WiFiClient
+// Ubidots
+#define TOKEN "BBUS-bHKWYWHW5fQU2tSMKIUXiPu7PbRUv5"  // token Ubidots
+Ubidots client(TOKEN);
 
 void setup() {
   Serial.begin(9600);
@@ -43,8 +42,11 @@ void setup() {
 
   Serial.println("");
   Serial.println("Connected to WiFi");
-}
 
+  // Connexion à Ubidots MQTT
+  client.wifiConnection((char*)ssid, (char*)password); // Connexion WiFi pour Ubidots MQTT
+  client.begin(); // Démarre la connexion MQTT avec Ubidots
+}
 void loop() {
   // Lire les données ECG
   int ecgValue = analogRead(ecgPin);
@@ -62,29 +64,24 @@ void loop() {
     }
   }
 
-  // Envoi des données au serveur si des coordonnées GPS valides sont disponibles et si de nouvelles données sont disponibles
+  // Envoi des données à Ubidots si des coordonnées GPS valides sont disponibles
   if (gpsDataAvailable) {
-    HTTPClient http;
-    http.begin(wifiClient, serverUrl); // Utilisation de wifiClient comme premier argument
+    // Envoyer les données ECG à Ubidots
+    client.add("ecg", ecgValue); // Ajouter la valeur de l'ECG à Ubidots
 
-    http.addHeader("Content-Type", "application/json");
+    // Envoyer les données GPS à Ubidots
+    client.add("latitude", latitude);
+    client.add("longitude", longitude);
 
-    // Création du JSON avec les données ECG et GPS
-    String jsonData = "{\"ecg\": " + String(ecgValue) + ", \"latitude\": " + String(latitude, 6) + ", \"longitude\": " + String(longitude, 6) + "}";
+    // Publier les données vers Ubidots
+    client.ubidotsPublish("room"); // Publier les données dans l'emplacement "room" sur Ubidots
 
-    int httpResponseCode = http.POST(jsonData);
-    if (httpResponseCode > 0) {
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
-      String response = http.getString();
-      Serial.println("Response: " + response);
-    } else {
-      Serial.println("Error sending data");
-    }
-
-    http.end();
     gpsDataAvailable = false; // Réinitialiser le drapeau des nouvelles données GPS après l'envoi
   }
 
+  // Attendre avant de publier à nouveau (par exemple, toutes les 5 secondes)
   delay(5000); // Envoi des données toutes les 5 secondes
+
+  // Gestion de la boucle MQTT pour recevoir les messages
+  client.loop();
 }
